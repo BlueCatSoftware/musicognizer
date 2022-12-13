@@ -32,8 +32,11 @@ dependencies:
   audio_wave: ^0.1.4
   avatar_glow: ^2.0.2
   animated_text_kit: ^4.2.2
-  http: ^0.13.5
   dio: ^4.0.6
+  http: ^0.13.5
+  url_launcher: ^6.1.7
+  audioplayers: ^1.1.1
+
 
   flutter:
     sdk: flutter
@@ -52,8 +55,9 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^2.0.0
   flutter_acrcloud: ^0.1.6
+  flutter_lints: ^2.0.0
+
 
 
 # For information on the generic Dart part of this file, see the
@@ -69,7 +73,7 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
-    - images/img.png
+    - images/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware
