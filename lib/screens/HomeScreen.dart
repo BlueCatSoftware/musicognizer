@@ -30,6 +30,13 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
 
   late ACRCloudSession session;
 
+  @override
+  void dispose() {
+    // TODO: implement dispose
+    super.dispose();
+    session.dispose();
+  }
+
   void _animation() {
     Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
@@ -38,6 +45,8 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
       });
     });
   }
+
+
 
   startListening() async {}
 
@@ -68,7 +77,7 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
           title: const Padding(
             padding: EdgeInsets.all(8.0),
             child: Text(
-              'Musicognizer',
+              '',
               style: TextStyle(fontSize: 25),
             ),
           ),
@@ -84,7 +93,7 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
               return GestureDetector(
                   child: const Icon(Icons.library_music_rounded),
                   onTap: (){
-                    Navigator.push(context, MaterialPageRoute(builder: (builder) => History()));
+                    Navigator.push(context, MaterialPageRoute(builder: (builder) => const History()));
                   },
               );
             }
@@ -104,7 +113,10 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
               child: Text(
                 tap_string,
                 key: ValueKey<String>(tap_string),
-                style: const TextStyle(fontSize: 28, color: Colors.white),
+                style: const TextStyle(
+                    fontSize: 28, color: Colors.white,
+                  fontFamily: 'ManropeBold'
+                ),
               ),
             ),
             Expanded(
@@ -133,6 +145,7 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
                                 if (isListening) {
                                   isListening = false;
                                   session.cancel();
+                                  session.dispose();
                                 } else {
                                   isListening = true;
                                   session = ACRCloud.startSession();
@@ -213,7 +226,7 @@ class HomeState extends State<Home> with SingleTickerProviderStateMixin {
         floatingActionButton: FloatingActionButton.extended(
           onPressed: () {},
           backgroundColor: Colors.deepPurpleAccent,
-          label: const Text("Search Music"),
+          label: const Text("Search Music",style: TextStyle(fontFamily: 'ManropeBold'),),
           icon: const Icon(Icons.queue_music_rounded),
         ),
       ),

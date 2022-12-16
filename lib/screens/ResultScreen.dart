@@ -1,8 +1,10 @@
 import 'package:audioplayers/audioplayers.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:dio/dio.dart';
 
 import 'package:animated_text_kit/animated_text_kit.dart';
 import 'package:flutter/material.dart';
+import 'package:musicognizer/manager/CacheManager.dart';
 import 'package:musicognizer/model/music_item.dart';
 import 'dart:convert' as convert;
 import 'package:http/http.dart' as http;
@@ -52,11 +54,15 @@ class ResultScreenState extends State<ResultScreen> {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $accessToken'
     };
+    String query = removeSymbolsAndEncodeSpaces(
+        '${widget.musicItem.musicianName} ${widget.musicItem.trackName}');
+    print(query);
 
+    body.replaceAll('', ' ');
     var request = http.Request(
         'GET',
         Uri.parse(
-            'https://api.spotify.com/v1/tracks/${widget.musicItem.spotifyTackId}'));
+            'https://api.spotify.com/v1/search?q=$query&type=track&limit=1'));
 
     request.headers.addAll(headers);
 
@@ -64,7 +70,7 @@ class ResultScreenState extends State<ResultScreen> {
     var response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode == 200) {
-      //print(response.body);
+      print(response.body);
     } else {
       print(response.reasonPhrase);
     }
@@ -73,14 +79,14 @@ class ResultScreenState extends State<ResultScreen> {
       Map<String, dynamic> baseUrl = convert.jsonDecode(response.body);
       //print(baseUrl);
 
-      List<dynamic> list = baseUrl['artists'];
-      openUrl = baseUrl['href'];
+      Map<String, dynamic> content = baseUrl['tracks']['items'].elementAt(0);
+      openUrl = content['external_urls']['spotify'];
       setState(() {
-        url = baseUrl['album']['images'].first['url'];
-        artists = list;
-        trackName = baseUrl['name'];
-        albumName = baseUrl['album']['name'];
-        previewUrl = baseUrl['preview_url'].toString();
+        url = content['album']['images'].first['url'];
+        artists = content['artists'];
+        trackName = content['name'];
+        albumName = content['album']['name'];
+        previewUrl = content['preview_url'];
       });
 
       setState(() {
@@ -106,6 +112,12 @@ class ResultScreenState extends State<ResultScreen> {
     }
   }
 
+  String removeSymbolsAndEncodeSpaces(String input) {
+    return input
+        .replaceAll(RegExp(r"[^A-Za-z0-9\s]"), "")
+        .replaceAll(RegExp(r"\s"), "%20");
+  }
+
   Widget AlbumArtImage() {
     if (url.isEmpty) {
       return Card(
@@ -120,15 +132,17 @@ class ResultScreenState extends State<ResultScreen> {
       );
     } else {
       return Card(
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(15))),
-        clipBehavior: Clip.antiAlias,
-        child: Image.network(
-          url!,
-          width: 400,
-          height: 400,
-        ),
-      );
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(15))),
+          clipBehavior: Clip.antiAlias,
+          child: CachedNetworkImage(
+            height: 400,
+            width: 400,
+            imageUrl: url!,
+            progressIndicatorBuilder: (context, url, downloadProgress) =>
+                Container(height: 250, width: 250,child: CircularProgressIndicator(value: downloadProgress.progress, strokeWidth: 2.5,)),
+            errorWidget: (context, url, error) => const Icon(Icons.error),
+          ));
     }
   }
 
@@ -150,12 +164,6 @@ class ResultScreenState extends State<ResultScreen> {
         sliderPosition = event;
       });
     });
-
-    player.onPlayerComplete.listen((event) {
-      setState(() {
-        sliderValue = Duration.zero;
-      });
-    });
   }
 
   void setUpPlayer() async {
@@ -172,10 +180,16 @@ class ResultScreenState extends State<ResultScreen> {
           appBar: AppBar(
             title: Column(
               children: [
-                const Text('Gotten from'),
+                const Text(
+                  'Gotten from',
+                  style: TextStyle(fontFamily: 'ManropeBold'),
+                ),
                 Text(
                   '$albumName Album',
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
+                  style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey,
+                      fontFamily: 'ManropeBold'),
                 )
               ],
             ),
@@ -199,11 +213,17 @@ class ResultScreenState extends State<ResultScreen> {
                   ),
                   Text(
                     trackName,
-                    style: const TextStyle(color: Colors.white, fontSize: 20),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontFamily: 'ManropeBold'),
                   ),
                   Text(
                     artist,
-                    style: TextStyle(color: Colors.grey[300], fontSize: 20),
+                    style: const TextStyle(
+                        color: Colors.grey,
+                        fontSize: 16,
+                        fontFamily: 'ManropeBold'),
                   ),
                   const SizedBox(
                     height: 20,
@@ -220,22 +240,26 @@ class ResultScreenState extends State<ResultScreen> {
                           },
                           max: sliderValue.inSeconds.toDouble(),
                           activeColor: Colors.white,
-                          inactiveColor: Colors.white54,
+                          inactiveColor: Colors.grey,
                         ),
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 25),
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
                                 '00:${sliderPosition.inSeconds.toString()}',
                                 style: const TextStyle(
-                                    color: Colors.white, fontSize: 14),
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontFamily: 'ManropeBold'),
                               ),
                               Text(
                                 '00:${sliderValue.inSeconds.toString()}',
                                 style: const TextStyle(
-                                    color: Colors.white, fontSize: 14),
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontFamily: 'ManropeBold'),
                               )
                             ],
                           ),
@@ -253,7 +277,10 @@ class ResultScreenState extends State<ResultScreen> {
             onPressed: () {
               player.play(UrlSource(previewUrl));
             },
-            label: const Text("Play on Spotify"),
+            label: const Text(
+              "Play Preview",
+              style: TextStyle(fontFamily: 'ManropeBold'),
+            ),
             backgroundColor: Colors.deepPurpleAccent,
             icon: const Icon(Icons.play_arrow_rounded),
           ),
