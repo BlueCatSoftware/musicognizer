@@ -38,9 +38,13 @@ dependencies:
   audioplayers: ^1.1.1
   shared_preferences: ^2.0.15
   cached_network_image: ^3.2.3
+  google_mobile_ads: ^2.3.0
+  about: ^2.1.1
+  package_info_plus: ^3.0.2
 
   flutter:
     sdk: flutter
+  firebase_analytics: ^10.0.7
 
 
   # The following adds the Cupertino Icons font to your application.
@@ -58,8 +62,13 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_acrcloud: ^0.1.6
   flutter_lints: ^2.0.0
+  flutter_launcher_icons: ^0.11.0
 
-
+flutter_icons:
+  image_path_android: "images/logo.png"
+  android: true # can specify file name here e.g. "ic_launcher"
+  adaptive_icon_background: "#ffffff"
+  min_sdk_android: 21
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

@@ -1,13 +1,20 @@
+import 'dart:async';
+import 'dart:collection';
+import 'dart:typed_data';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:dio/dio.dart';
 
 import 'package:animated_text_kit/animated_text_kit.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:musicognizer/manager/CacheManager.dart';
 import 'package:musicognizer/model/music_item.dart';
 import 'dart:convert' as convert;
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher_string.dart';
 
 class ResultScreen extends StatefulWidget {
   final MusicItem musicItem;
@@ -18,7 +25,8 @@ class ResultScreen extends StatefulWidget {
   State<StatefulWidget> createState() => ResultScreenState();
 }
 
-class ResultScreenState extends State<ResultScreen> {
+class ResultScreenState extends State<ResultScreen>
+    with WidgetsBindingObserver {
   String url = '';
   late String trackUrl;
   String openUrl = '';
@@ -26,13 +34,18 @@ class ResultScreenState extends State<ResultScreen> {
   late String artist;
   String albumName = '';
   String trackName = '';
-  dynamic previewUrl = '';
+  String previewUrl = '';
+  List<Map<String, dynamic>> recommendedList = [];
 
   Duration sliderValue = Duration.zero;
   Duration sliderPosition = Duration.zero;
   bool isLoaded = false;
+  bool adLoaded = false;
 
   final player = AudioPlayer();
+
+  late InterstitialAd ad;
+  late BannerAd bannerAd;
 
   Future<void> getMusicInfo() async {
     // Your Spotify client ID and client secret
@@ -62,7 +75,7 @@ class ResultScreenState extends State<ResultScreen> {
     var request = http.Request(
         'GET',
         Uri.parse(
-            'https://api.spotify.com/v1/search?q=$query&type=track&limit=1'));
+            'https://api.spotify.com/v1/search?q=$query&type=track&limit=10'));
 
     request.headers.addAll(headers);
 
@@ -79,10 +92,25 @@ class ResultScreenState extends State<ResultScreen> {
       Map<String, dynamic> baseUrl = convert.jsonDecode(response.body);
       //print(baseUrl);
 
+      List<dynamic> totalItems = baseUrl['tracks']['items'];
+
       Map<String, dynamic> content = baseUrl['tracks']['items'].elementAt(0);
-      openUrl = content['external_urls']['spotify'];
+      openUrl = content['uri'];
+
+      for (var i = 0; i < totalItems.length; i++) {
+        Map<String, dynamic> content = baseUrl['tracks']['items'].elementAt(i);
+        Map<String, dynamic> map = HashMap();
+        map['albumPic'] = content['album']['images'].elementAt(1)['url'];
+        map['artists'] = content['artists'];
+        map['trackName'] = content['name'];
+        map['previewUrl'] = content['preview_url'];
+        map['openUrl'] = content['uri'];
+        map['albumName'] = content['album']['name'];
+        recommendedList.add(map);
+      }
+
       setState(() {
-        url = content['album']['images'].first['url'];
+        url = content['album']['images'].elementAt(1)['url'];
         artists = content['artists'];
         trackName = content['name'];
         albumName = content['album']['name'];
@@ -90,20 +118,14 @@ class ResultScreenState extends State<ResultScreen> {
       });
 
       setState(() {
-        String localArtist = '';
-        for (var i = 0; i < artists.length; i++) {
-          if (i + 1 != artists.length && artists.length != 1) {
-            localArtist = '$localArtist ${artists.elementAt(i)['name']} x';
-          } else {
-            localArtist = '$localArtist ${artists.elementAt(i)['name']}';
-          }
-        }
-        artist = localArtist;
+        artist = calculateArtists(artists);
       });
 
       setState(() {
         isLoaded = true;
       });
+
+      cacheMusic();
 
       print(previewUrl);
       print(artists);
@@ -112,13 +134,29 @@ class ResultScreenState extends State<ResultScreen> {
     }
   }
 
+  String calculateArtists(List<dynamic> list) {
+    String localArtist = '';
+    for (var i = 0; i < list.length; i++) {
+      if (i + 1 != list.length && list.length != 1) {
+        localArtist = '$localArtist ${list.elementAt(i)['name']} x';
+      } else {
+        if (i == 0) {
+          localArtist = list.elementAt(i)['name'];
+        } else {
+          localArtist = '$localArtist ${list.elementAt(i)['name']}';
+        }
+      }
+    }
+    return localArtist.trim();
+  }
+
   String removeSymbolsAndEncodeSpaces(String input) {
     return input
         .replaceAll(RegExp(r"[^A-Za-z0-9\s]"), "")
         .replaceAll(RegExp(r"\s"), "%20");
   }
 
-  Widget AlbumArtImage() {
+  Widget albumCoverImage() {
     if (url.isEmpty) {
       return Card(
         shape: const RoundedRectangleBorder(
@@ -127,7 +165,7 @@ class ResultScreenState extends State<ResultScreen> {
         child: Image.asset(
           "images/img.png",
           width: 400,
-          height: 400,
+          height: 300,
         ),
       );
     } else {
@@ -136,20 +174,97 @@ class ResultScreenState extends State<ResultScreen> {
               borderRadius: BorderRadius.all(Radius.circular(15))),
           clipBehavior: Clip.antiAlias,
           child: CachedNetworkImage(
-            height: 400,
-            width: 400,
-            imageUrl: url!,
-            progressIndicatorBuilder: (context, url, downloadProgress) =>
-                Container(height: 250, width: 250,child: CircularProgressIndicator(value: downloadProgress.progress, strokeWidth: 2.5,)),
+            height: 150,
+            width: 150,
+            imageUrl: url,
             errorWidget: (context, url, error) => const Icon(Icons.error),
           ));
     }
   }
 
   @override
+  void dispose() {
+    // TODO: implement dispose
+    super.dispose();
+    ad.dispose();
+    bannerAd.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+  }
+
+  void loadBanner() {
+    final BannerAdListener listener = BannerAdListener(
+      // Called when an ad is successfully received.
+      onAdLoaded: (Ad ad) => print('Ad loaded.'),
+      // Called when an ad request failed.
+      onAdFailedToLoad: (Ad ad, LoadAdError error) {
+        // Dispose the ad here to free resources.
+        ad.dispose();
+        print('Ad failed to load: $error');
+      },
+      // Called when an ad opens an overlay that covers the screen.
+      onAdOpened: (Ad ad) => print('Ad opened.'),
+      // Called when an ad removes an overlay that covers the screen.
+      onAdClosed: (Ad ad) => print('Ad closed.'),
+      // Called when an impression occurs on the ad.
+      onAdImpression: (Ad ad) => print('Ad impression.'),
+    );
+    bannerAd = BannerAd(
+        size: const AdSize(width: 300, height: 50),
+        adUnitId: 'ca-app-pub-6314399559271167/3279067787',
+        listener: listener,
+        request: const AdRequest());
+    bannerAd.load();
+  }
+
+  void loadAd() {
+    InterstitialAd.load(
+        adUnitId: 'ca-app-pub-6314399559271167/7785590324',
+        request: const AdRequest(),
+        adLoadCallback: InterstitialAdLoadCallback(
+          onAdLoaded: (InterstitialAd ad) {
+            // Keep a reference to the ad so you can show it later.
+            print("execustion of interstitial ad");
+            this.ad = ad;
+            setState(() {
+              adLoaded = true;
+            });
+          },
+          onAdFailedToLoad: (LoadAdError error) {
+            print('InterstitialAd failed to load: $error');
+          },
+        )).then((value) => ad.show());
+  }
+
+  void initAd() {
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (InterstitialAd ad) {
+        loadAd();
+        print('%ad onAdShowedFullScreenContent.');
+      },
+      onAdDismissedFullScreenContent: (InterstitialAd ad) {
+        print('$ad onAdDismissedFullScreenContent.');
+      },
+      onAdFailedToShowFullScreenContent: (InterstitialAd ad, AdError error) {
+        print('$ad onAdFailedToShowFullScreenContent: $error');
+        ad.dispose();
+      },
+      onAdImpression: (InterstitialAd ad) => print('$ad impression occurred.'),
+    );
+  }
+
+  @override
   void initState() {
     // TODO: implement initState
     super.initState();
+    MobileAds.instance.initialize();
+    player.onPositionChanged.listen((value) {
+      setState(() {
+        sliderValue = value;
+      });
+    });
+    loadAd();
+    loadBanner();
+    WidgetsBinding.instance.addObserver(this);
     print(widget.musicItem.spotifyTackId);
     getMusicInfo();
 
@@ -158,25 +273,26 @@ class ResultScreenState extends State<ResultScreen> {
         sliderValue = event;
       });
     });
-
-    player.onPositionChanged.listen((event) {
-      setState(() {
-        sliderPosition = event;
-      });
-    });
   }
 
-  void setUpPlayer() async {
-    await player.setSourceUrl(previewUrl);
+  Future<void> cacheMusic() async {
+    ItemStorage.init();
+    Uint8List imageBytes = await ItemStorage.getImageBytesFromUrl(url);
+    ItemStorage.addItem(trackName, artist, imageBytes);
   }
 
   @override
   Widget build(BuildContext context) {
     if (isLoaded) {
+      if (adLoaded) {
+        Timer(const Duration(seconds: 3), () {
+          ad.show();
+        });
+      }
       return MaterialApp(
         debugShowCheckedModeBanner: false,
         home: Scaffold(
-          backgroundColor: Colors.deepPurple,
+          backgroundColor: Colors.deepPurpleAccent,
           appBar: AppBar(
             title: Column(
               children: [
@@ -196,93 +312,238 @@ class ResultScreenState extends State<ResultScreen> {
             titleTextStyle:
                 const TextStyle(fontSize: 16, overflow: TextOverflow.clip),
             centerTitle: true,
-            backgroundColor: Colors.deepPurple,
+            backgroundColor: Colors.deepPurpleAccent,
             elevation: 0,
           ),
-          body: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Center(
-              child: Column(
-                children: [
-                  const SizedBox(
-                    height: 20,
-                  ),
-                  AlbumArtImage(),
-                  const SizedBox(
-                    height: 30,
-                  ),
-                  Text(
-                    trackName,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontFamily: 'ManropeBold'),
-                  ),
-                  Text(
-                    artist,
-                    style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 16,
-                        fontFamily: 'ManropeBold'),
-                  ),
-                  const SizedBox(
-                    height: 20,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Column(
+          body: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  children: [
+                    Row(
+                      // crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Slider(
-                          value: sliderPosition.inSeconds.toDouble(),
-                          onChanged: (value) async {
-                            final position = Duration(seconds: value.toInt());
-                            await player.seek(position);
-                          },
-                          max: sliderValue.inSeconds.toDouble(),
-                          activeColor: Colors.white,
-                          inactiveColor: Colors.grey,
+                        const SizedBox(
+                          height: 10,
                         ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        albumCoverImage(),
+                        const SizedBox(
+                          width: 10,
+                        ),
+                        SizedBox(
+                          width: MediaQuery.of(context).size.width - 200,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                '00:${sliderPosition.inSeconds.toString()}',
+                                trackName,
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 14,
                                     fontFamily: 'ManropeBold'),
                               ),
+                              const SizedBox(
+                                height: 5,
+                              ),
                               Text(
-                                '00:${sliderValue.inSeconds.toString()}',
+                                artist,
                                 style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
+                                    color: Colors.grey,
+                                    fontSize: 12,
                                     fontFamily: 'ManropeBold'),
-                              )
+                              ),
+                              const SizedBox(
+                                height: 10,
+                              ),
+                              Row(
+                                children: [
+                                  MaterialButton(
+                                    shape: const RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadiusDirectional.all(
+                                                Radius.circular(20))),
+                                    onPressed: () async {
+                                      await launchUrlString(openUrl);
+                                    },
+                                    color: Colors.green,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 8),
+                                      child: Row(
+                                        children: const [
+                                          Icon(
+                                            Icons.play_arrow_rounded,
+                                            color: Colors.white,
+                                          ),
+                                          SizedBox(
+                                            width: 2,
+                                          ),
+                                          Text(
+                                            "Play on Spotify",
+                                            style: TextStyle(
+                                                fontFamily: 'ManropeBold',
+                                                fontSize: 14,
+                                                color: Colors.white),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: 5,
+                                  ),
+                                  MaterialButton(
+                                    minWidth: 50,
+                                    onPressed: () {
+                                      if (player.state == PlayerState.playing) {
+                                        player.pause();
+                                      } else {
+                                        if (player.state ==
+                                            PlayerState.paused) {
+                                          player.resume();
+                                        } else {
+                                          player.stop();
+                                          player.release();
+                                          player.play(UrlSource(previewUrl));
+                                        }
+                                      }
+                                    },
+                                    shape: const RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadiusDirectional.all(
+                                                Radius.circular(20))),
+                                    color: Colors.deepPurple,
+                                    child: player.state == PlayerState.playing
+                                        ? const Icon(
+                                            Icons.pause_rounded,
+                                            color: Colors.white,
+                                          )
+                                        : const Icon(
+                                            Icons.play_arrow_rounded,
+                                            color: Colors.white,
+                                          ),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
-                        )
+                        ),
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
+              DraggableScrollableSheet(
+                initialChildSize: .75,
+                minChildSize: .75,
+                maxChildSize: .85,
+                builder:
+                    (BuildContext context, ScrollController scrollController) {
+                  return Container(
+                    decoration: BoxDecoration(
+                        color: Colors.deepPurple[500],
+                        borderRadius: const BorderRadiusDirectional.only(
+                            topEnd: Radius.circular(20),
+                            topStart: Radius.circular(20))),
+                    child: ListView.builder(
+                        controller: scrollController,
+                        itemCount: recommendedList.length,
+                        itemBuilder: (buildContext, position) {
+                          if (position != 0) {
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  trackName = recommendedList
+                                      .elementAt(position)['trackName'];
+                                  artist = calculateArtists(recommendedList
+                                      .elementAt(position)['artists']);
+                                  url = recommendedList
+                                      .elementAt(position)['albumPic'];
+                                  albumName = recommendedList
+                                      .elementAt(position)['albumName'];
+                                  previewUrl = recommendedList
+                                      .elementAt(position)['previewUrl'];
+                                  openUrl = recommendedList
+                                      .elementAt(position)['openUrl'];
+                                  player.stop();
+                                });
+                              },
+                              child: Container(
+                                decoration: BoxDecoration(
+                                    color: Colors.purple[100],
+                                    borderRadius:
+                                        const BorderRadiusDirectional.all(
+                                      Radius.circular(20),
+                                    )),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 12),
+                                margin: const EdgeInsets.symmetric(
+                                    vertical: 8, horizontal: 16),
+                                child: Row(children: [
+                                  Card(
+                                      clipBehavior: Clip.antiAlias,
+                                      shape: const RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.all(
+                                              Radius.circular(20))),
+                                      child: CachedNetworkImage(
+                                        imageUrl: recommendedList
+                                            .elementAt(position)['albumPic'],
+                                        placeholder: (context, url) =>
+                                            Image.asset('images/img.png'),
+                                        errorWidget: (context, url, dyn) =>
+                                            Image.asset('images/img.png'),
+                                        height: 70,
+                                        width: 70,
+                                      )),
+                                  const SizedBox(
+                                    width: 6,
+                                  ),
+                                  Column(
+                                    children: [
+                                      SizedBox(
+                                        width:
+                                            MediaQuery.of(context).size.width -
+                                                200,
+                                        child: Text(
+                                          recommendedList
+                                              .elementAt(position)['trackName'],
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width:
+                                            MediaQuery.of(context).size.width -
+                                                200,
+                                        child: Text(
+                                          calculateArtists(recommendedList
+                                              .elementAt(position)['artists']),
+                                        ),
+                                      )
+                                    ],
+                                  )
+                                ]),
+                              ),
+                            );
+                          } else {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 10),
+                              child: Text(
+                                "Suggestions",
+                                style: TextStyle(
+                                    fontSize: 16, color: Colors.white),
+                              ),
+                            );
+                          }
+                        }),
+                  );
+                },
+              ),
+            ],
           ),
-          floatingActionButtonLocation:
-              FloatingActionButtonLocation.centerFloat,
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () {
-              player.play(UrlSource(previewUrl));
-            },
-            label: const Text(
-              "Play Preview",
-              style: TextStyle(fontFamily: 'ManropeBold'),
-            ),
-            backgroundColor: Colors.deepPurpleAccent,
-            icon: const Icon(Icons.play_arrow_rounded),
+          bottomNavigationBar: Container(
+            color: Colors.deepPurple[500],
+            child: SizedBox(height: 50, child: AdWidget(ad: bannerAd)),
           ),
         ),
       );
